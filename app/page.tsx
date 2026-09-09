@@ -7,7 +7,8 @@ import { getCanonicalResultRows } from "@/lib/musicbrainz";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export default async function Home() {
+export default async function Home({ searchParams }: { searchParams?: Promise<{ error?: string; notice?: string }> }) {
+  const { error, notice } = (await searchParams) ?? {};
   const challenges = listOpenChallenges();
   const resultRows = await getCanonicalResultRows(challenges[0] ? getResultRows(challenges[0].id) : []);
   const resultCounts = new Map<string, { artist: string; track: string; count: number }>();
@@ -31,5 +32,7 @@ export default async function Home() {
     providers={{ spotify: config.spotifyConfigured, youtube: config.youtubeConfigured }}
     challengeLinks={challenges.map((challenge) => ({ slug: challenge.slug, name: challenge.name }))}
     topResults={topResultsWithArt}
+    notice={notice}
+    error={error}
   />;
 }

@@ -11,7 +11,7 @@ import { exchangeYouTubeCode, getYouTubeCurrentChannel, getYouTubePlaylist, getY
 export const runtime = "nodejs";
 
 function redirectToChallengeError(request: NextRequest, slug: string, message: string) {
-  const url = new URL(`/challenge/${slug}`, request.url);
+  const url = new URL("/", request.url);
   url.searchParams.set("error", message);
   return NextResponse.redirect(url);
 }
@@ -113,7 +113,7 @@ export async function GET(request: NextRequest) {
     after(() => enrichSubmissionTracks(result.submissionId, rows));
 
     const notice = result.replaced ? "Deine bisherige Einreichung wurde ersetzt." : "Deine Playlist wurde erfolgreich eingereicht.";
-    const response = NextResponse.redirect(new URL(`/challenge/${challenge.slug}?notice=${encodeURIComponent(notice)}`, request.url));
+    const response = NextResponse.redirect(new URL(`/?notice=${encodeURIComponent(notice)}`, request.url));
     response.cookies.delete("youtube_oauth_state");
     return response;
   } catch (error) {

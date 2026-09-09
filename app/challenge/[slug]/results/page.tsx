@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { getChallengeBySlug, getResultRows } from "@/lib/db";
 import { getCoverArtUrl } from "@/lib/cover-art";
 import { getCanonicalResultRows } from "@/lib/musicbrainz";
+import { SiteNav } from "@/components/SiteNav";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,8 +35,8 @@ export default async function Results({ params }: { params: Promise<{ slug: stri
     })));
     ranked.push(...withArt);
   }
-  return <main className="container"><p><a className="button" href={`/challenge/${slug}`}>Back to challenge</a></p><h1>{challenge.name}: Results</h1><div className="card">
+  return <main className="home-shell"><SiteNav active="results" resultsHref={`/challenge/${slug}/results`} /><div className="container"><h1>{challenge.name}: Results</h1><div className="card">
     {!ranked.length && <p className="muted">No results yet.</p>}
     {ranked.map((r,i) => <div className="track result-track" key={`${r.artist}-${r.track}`}>{r.coverArtUrl ? <img className="result-art" src={r.coverArtUrl} alt="" width={56} height={56} loading="lazy" /> : <span className="result-art result-art-fallback" aria-hidden="true" />}<span><strong>#{i+1} {r.track}</strong><br/><span className="muted">{r.artist}</span></span><strong>{r.count}</strong></div>)}
-  </div></main>;
+  </div></div></main>;
 }

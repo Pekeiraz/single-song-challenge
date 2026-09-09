@@ -1,9 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import Image from "next/image";
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { SubmitForm } from "@/components/SubmitForm";
+import { SiteNav } from "@/components/SiteNav";
 
 type Challenge = { id: string; name: string; slug: string };
 type Providers = { spotify: boolean; youtube: boolean };
@@ -13,14 +13,76 @@ export function HomeExperience({
   providers,
   challengeLinks,
   topResults,
+  notice,
+  error,
 }: {
   challenges: Challenge[];
   providers: Providers;
   challengeLinks: { slug: string; name: string }[];
   topResults: { artist: string; track: string; count: number; coverArtUrl: string | null }[];
+  notice?: string;
+  error?: string;
 }) {
   const [isSubmitOpen, setIsSubmitOpen] = useState(false);
   const [selectedChallengeId, setSelectedChallengeId] = useState(challenges[0]?.id ?? "");
+  const [hovered, setHovered] = useState<{ r: number; c: number; t: number } | null>(null);
+  const [now, setNow] = useState(0);
+  const floorRef = useRef<HTMLDivElement>(null);
+  const [floorSize, setFloorSize] = useState({ w: 0, h: 0 });
+
+  // Tick while hovering so the glow can decay / fan out when the mouse stops.
+  useEffect(() => {
+    if (!hovered) return;
+    const id = setInterval(() => setNow(Date.now()), 100);
+    return () => clearInterval(id);
+  }, [hovered?.r, hovered?.c]);
+
+  const ROWS = 11;
+  const GAP = 3;
+  const FLOOR_PAD = 3;
+  useEffect(() => {
+    const el = floorRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const rect = entries[0].contentRect;
+      setFloorSize({ w: rect.width, h: rect.height });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const tileSize = floorSize.h > 0 ? Math.floor((floorSize.h - GAP * (ROWS - 1) - FLOOR_PAD * 2) / ROWS) : 0;
+  const COLS = tileSize > 0 && floorSize.w > 0 ? Math.max(1, Math.floor((floorSize.w - FLOOR_PAD * 2 + GAP) / (tileSize + GAP))) : 36;
+  // Stable random colors so resizing doesn't reshuffle the pattern.
+  const discoColors = useMemo(() => {
+    const palette = ["#ff2fb3", "#00e5ff", "#ffe600", "#7cff00", "#ff6b00", "#9d00ff", "#ff003c", "#00ff9d"];
+    return Array.from({ length: 120 * ROWS }, () => palette[Math.floor(Math.random() * palette.length)]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const discoTiles = useMemo(() => {
+    return Array.from({ length: COLS * ROWS }, (_, i) => {
+      const r = Math.floor(i / COLS);
+      const c = i % COLS;
+      return { id: i, r, c, color: discoColors[i % discoColors.length] };
+    });
+  }, [COLS, discoColors]);
+
+  function handleFloorMove(e: React.MouseEvent<HTMLElement>) {
+    if (!tileSize || !floorRef.current) return;
+    const rect = floorRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left - FLOOR_PAD;
+    const y = e.clientY - rect.top - FLOOR_PAD;
+    const step = tileSize + GAP;
+    const c = Math.floor(x / step);
+    const r = Math.floor(y / step);
+    if (c < 0 || r < 0 || c >= COLS || r >= ROWS) {
+      setHovered(null);
+      return;
+    }
+    const t = Date.now();
+    setHovered((prev) => (prev?.r === r && prev?.c === c ? { ...prev, t } : { r, c, t }));
+    setNow(t);
+  }
 
   function openSubmit() {
     setSelectedChallengeId((current) => current || challenges[0]?.id || "");
@@ -28,15 +90,50 @@ export function HomeExperience({
   }
 
   return <main className="home-shell">
-    <nav className="site-nav" aria-label="Main navigation">
-      <Link className="brand-mark" href="/">Playlist Challenge</Link>
-      <div className="nav-links">
-        <Link className="active" href="/">Home</Link>
-        <Link href={challengeLinks[0] ? `/challenge/${challengeLinks[0].slug}/results` : "#challenges-title"}>Results</Link>
+    <SiteNav
+      active="home"
+      resultsHref={challengeLinks[0] ? `/challenge/${challengeLinks[0].slug}/results` : "#challenges-title"}
+    />
+    <section className="hero-banner disco-banner" aria-labelledby="home-title" onMouseMove={handleFloorMove} onMouseLeave={() => setHovered(null)}>
+      <div ref={floorRef} className="disco-floor" aria-hidden="true">
+        {discoTiles.map((tile) => {
+          // Square Chebyshev neighborhood. When the mouse stops, the glow
+          // fans out (radius grows, intensity decays) instead of sitting hot.
+          const idleMs = hovered ? Math.max(0, now - hovered.t) : 0;
+          const spread = hovered ? Math.min(3, Math.floor(idleMs / 350)) : 0;
+          const decay = hovered ? Math.max(0.25, 1 - idleMs / 1600) : 0;
+          let glow = 0;
+          if (hovered) {
+            const d = Math.max(Math.abs(tile.r - hovered.r), Math.abs(tile.c - hovered.c));
+            const radius = 2 + spread;
+            if (d <= radius) {
+              const edge = d / (radius + 1);
+              glow = (1 - edge) * decay;
+            }
+          }
+          const bright = glow > 0 ? 1 + glow * 1.35 : 1;
+          return (
+            <span
+              key={tile.id}
+              className="disco-tile"
+              style={
+                {
+                  width: tileSize ? `${tileSize}px` : undefined,
+                  height: tileSize ? `${tileSize}px` : undefined,
+                  background: tile.color,
+                  opacity: glow > 0 ? 0.5 + glow * 0.5 : 0.5,
+                  boxShadow: glow > 0 ? `0 0 ${Math.round(glow * 63)}px ${tile.color}, 0 0 ${Math.round(glow * 15)}px #fff inset` : "0 0 0px transparent",
+                  filter: glow > 0 ? `brightness(${bright.toFixed(2)}) saturate(1.6)` : "brightness(1) saturate(1)",
+                  zIndex: glow > 0 ? 1 : 0,
+                } as React.CSSProperties
+              }
+            />
+          );
+        })}
       </div>
-    </nav>
-    <section className="hero-banner" aria-labelledby="home-title">
       <div className="hero-glow" aria-hidden="true" />
+      {error && <p className="error" role="alert">{error}</p>}
+      {notice && <p className="notice" role="status">{notice}</p>}
       <div className="hero-copy">
         <p className="eyebrow">Playlist Challenge / 2026</p>
         <h1 id="home-title">Find the one song<br /><em>that stays with you.</em></h1>

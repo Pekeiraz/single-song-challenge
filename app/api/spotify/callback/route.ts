@@ -11,7 +11,7 @@ import { exchangeCode, getCurrentUser, getPlaylist, getPlaylistItems } from "@/l
 export const runtime = "nodejs";
 
 function redirectToChallengeError(request: NextRequest, slug: string, message: string) {
-  const url = new URL(`/challenge/${slug}`, request.url);
+  const url = new URL("/", request.url);
   url.searchParams.set("error", message);
   return NextResponse.redirect(url);
 }
@@ -79,14 +79,14 @@ export async function GET(request: NextRequest) {
       after(() => enrichSubmissionTracks(result.submissionId, rows));
 
       const notice = result.replaced ? "Deine bisherige Einreichung wurde ersetzt." : "Deine Playlist wurde erfolgreich eingereicht.";
-      const response = NextResponse.redirect(new URL(`/challenge/${openChallengeSlug}?notice=${encodeURIComponent(notice)}`, request.url));
+      const response = NextResponse.redirect(new URL(`/?notice=${encodeURIComponent(notice)}`, request.url));
       response.cookies.delete("spotify_oauth_state");
       return response;
     } catch (error) {
       return redirectToChallengeError(request, openChallengeSlug, error instanceof Error ? error.message : "Submission konnte nicht gespeichert werden.");
     }
 
-    return NextResponse.redirect(new URL(`/challenge/${openChallengeSlug}`, request.url));
+    return NextResponse.redirect(new URL("/", request.url));
   } catch (error) {
     if (challengeSlug) return redirectToChallengeError(request, challengeSlug, error instanceof Error ? error.message : "Spotify-Import fehlgeschlagen.");
     return new NextResponse(error instanceof Error ? error.message : "Spotify-Import fehlgeschlagen.", { status: 500 });
