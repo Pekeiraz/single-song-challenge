@@ -2,7 +2,7 @@ import "./globals.css";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Playlist Challenge",
+  title: "Single Song Challenge",
   description: "Eine Song-pro-Interpret Playlist Challenge",
 };
 

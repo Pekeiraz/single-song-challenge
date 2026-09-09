@@ -27,6 +27,8 @@ export function HomeExperience({
   const [selectedChallengeId, setSelectedChallengeId] = useState(challenges[0]?.id ?? "");
   const [hovered, setHovered] = useState<{ r: number; c: number; t: number } | null>(null);
   const [now, setNow] = useState(0);
+  const [showNotice, setShowNotice] = useState(!!notice);
+  const [showError, setShowError] = useState(!!error);
   const floorRef = useRef<HTMLDivElement>(null);
   const [floorSize, setFloorSize] = useState({ w: 0, h: 0 });
 
@@ -36,6 +38,22 @@ export function HomeExperience({
     const id = setInterval(() => setNow(Date.now()), 100);
     return () => clearInterval(id);
   }, [hovered?.r, hovered?.c]);
+
+  // Reset visibility when a new notice/error arrives (e.g. after OAuth redirect).
+  useEffect(() => { setShowNotice(!!notice); }, [notice]);
+  useEffect(() => { setShowError(!!error); }, [error]);
+
+  // Auto-dismiss after 6s and strip ?notice/?error from the URL so a
+  // refresh doesn't bring the banner back.
+  useEffect(() => {
+    if (!showNotice && !showError) return;
+    const id = setTimeout(() => {
+      setShowNotice(false);
+      setShowError(false);
+      window.history.replaceState(null, "", window.location.pathname);
+    }, 6000);
+    return () => clearTimeout(id);
+  }, [showNotice, showError, notice, error]);
 
   const ROWS = 11;
   const GAP = 3;
@@ -51,8 +69,10 @@ export function HomeExperience({
     return () => ro.disconnect();
   }, []);
 
-  const tileSize = floorSize.h > 0 ? Math.floor((floorSize.h - GAP * (ROWS - 1) - FLOOR_PAD * 2) / ROWS) : 0;
-  const COLS = tileSize > 0 && floorSize.w > 0 ? Math.max(1, Math.floor((floorSize.w - FLOOR_PAD * 2 + GAP) / (tileSize + GAP))) : 36;
+  // Ceil (not floor) so tiles slightly overflow and get clipped by
+  // overflow:hidden instead of underfilling and leaving a black strip.
+  const tileSize = floorSize.h > 0 ? Math.ceil((floorSize.h - GAP * (ROWS - 1) - FLOOR_PAD * 2) / ROWS) : 0;
+  const COLS = tileSize > 0 && floorSize.w > 0 ? Math.max(1, Math.ceil((floorSize.w - FLOOR_PAD * 2 + GAP) / (tileSize + GAP))) : 36;
   // Stable random colors so resizing doesn't reshuffle the pattern.
   const discoColors = useMemo(() => {
     const palette = ["#ff2fb3", "#00e5ff", "#ffe600", "#7cff00", "#ff6b00", "#9d00ff", "#ff003c", "#00ff9d"];
@@ -95,7 +115,24 @@ export function HomeExperience({
       resultsHref={challengeLinks[0] ? `/challenge/${challengeLinks[0].slug}/results` : "#challenges-title"}
     />
     <section className="hero-banner disco-banner" aria-labelledby="home-title" onMouseMove={handleFloorMove} onMouseLeave={() => setHovered(null)}>
-      <div ref={floorRef} className="disco-floor" aria-hidden="true">
+      <div
+        ref={floorRef}
+        className="disco-floor"
+        aria-hidden="true"
+        style={
+          tileSize
+            ? {
+                display: "grid",
+                gridTemplateColumns: `repeat(${COLS}, ${tileSize}px)`,
+                gridAutoRows: `${tileSize}px`,
+                gap: GAP,
+                padding: FLOOR_PAD,
+                justifyContent: "start",
+                alignContent: "start",
+              }
+            : undefined
+        }
+      >
         {discoTiles.map((tile) => {
           // Square Chebyshev neighborhood. When the mouse stops, the glow
           // fans out (radius grows, intensity decays) instead of sitting hot.
@@ -132,12 +169,12 @@ export function HomeExperience({
         })}
       </div>
       <div className="hero-glow" aria-hidden="true" />
-      {error && <p className="error" role="alert">{error}</p>}
-      {notice && <p className="notice" role="status">{notice}</p>}
+      {showError && error && <p className="error" role="alert">{error}</p>}
+      {showNotice && notice && <p className="notice" role="status">{notice}</p>}
       <div className="hero-copy">
         <p className="eyebrow">Playlist Challenge / 2026</p>
         <h1 id="home-title">Find the one song<br /><em>that stays with you.</em></h1>
-        <p className="hero-lede">One playlist. One track per artist. No excuses.</p>
+        {/*<p className="hero-lede">One playlist. One track per artist. No excuses.</p>*/}
       </div>
       <button className="submit-launcher" type="button" onClick={openSubmit} disabled={!challenges.length}>
         <span className="launcher-icon" aria-hidden="true">+</span>
