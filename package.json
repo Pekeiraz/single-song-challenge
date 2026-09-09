@@ -1,0 +1,33 @@
+{
+  "name": "playlist-challenge",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.16.0"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "db:seed": "node --experimental-strip-types --experimental-specifier-resolution=node scripts/seed.ts",
+    "db:rematch": "node --env-file=.env.local --experimental-strip-types --experimental-specifier-resolution=node scripts/rematch.mjs",
+    "db:backfill-canonical": "node --env-file=.env.local --experimental-strip-types --experimental-specifier-resolution=node scripts/backfill-canonical.mjs",
+    "debug:mb": "node --env-file=.env.local scripts/debug-match.mjs"
+  },
+  "dependencies": {
+    "next": "^16.3.4",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.6.0",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^16.3.4",
+    "typescript": "^5.9.2"
+  }
+}
