@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { getArtistGroups, getArtistSongs, getChallengeBySlug } from "@/lib/db";
 import { getCachedCoverArtUrls } from "@/lib/cover-art";
 import { CoverArtLoader } from "@/components/CoverArtLoader";
+import { ArtistCard } from "@/components/ArtistCard";
 import { SearchBox } from "@/components/SearchBox";
 import { SiteNav } from "@/components/SiteNav";
 
@@ -45,14 +46,11 @@ export default async function Results({
   return <main className="home-shell"><SiteNav active="results" resultsHref={baseHref} topHref={topHref} /><div className="container"><h1>{challenge.name}: Results</h1><p className="muted">{totalArtists ? `${totalArtists} artists · ${totalSongs} songs${query ? ` · filter “${query}”` : ""} · showing artists ${offset + 1}–${endIndex}` : query ? `No artists match “${query}”.` : "No results yet."}</p>
   <SearchBox baseHref={baseHref} initialQuery={query} />
   {!pageArtists.length && <div className="card"><p className="muted">{query ? "No artists match your search." : "No results yet."}</p></div>}
-  {pageArtists.map((a) => <section className="card artist-card" key={a.artistKey} aria-label={a.artist}>
-    <header className="artist-header"><h2>{a.artist}</h2><span className="muted">{a.songs.length} {a.songs.length === 1 ? "song" : "songs"} · {a.totalVotes} {a.totalVotes === 1 ? "vote" : "votes"}</span></header>
-    {a.songs.map((s) => { const coverArtUrl = s.recordingId ? artMap.get(s.recordingId) ?? null : null; return <div className="track result-track" key={`${a.artistKey}-${s.track}`}>{coverArtUrl ? <img className="result-art" src={coverArtUrl} alt="" width={56} height={56} loading="lazy" /> : <span className="result-art result-art-fallback" data-cover-id={s.recordingId ?? undefined} aria-hidden="true" />}<span><strong>{s.track}</strong></span><strong>{s.count}×</strong></div>; })}
-  </section>)}
+  {pageArtists.map((a) => <ArtistCard key={a.artistKey} artist={a.artist} artistKey={a.artistKey} songCount={a.songs.length} totalVotes={a.totalVotes} songs={a.songs.map((s) => ({ track: s.track, recordingId: s.recordingId, count: s.count, coverArtUrl: s.recordingId ? artMap.get(s.recordingId) ?? null : null }))} />)}
   {missingIds.length > 0 && <CoverArtLoader ids={missingIds} />}
   {(page0 > 1 || hasNext) && <nav className="pager" aria-label="Artist pages">
     <Link className={page0 <= 1 ? "pager-btn pager-disabled" : "pager-btn"} aria-disabled={page0 <= 1} href={page0 <= 1 ? pageHref(1) : pageHref(page0 - 1)}>← Prev</Link>
-    <span className="muted">Page {page0}</span>
+    <span className="pager-label">Page {page0}</span>
     {hasNext
       ? <Link className="pager-btn" href={pageHref(page0 + 1)}>Next →</Link>
       : <span className="pager-btn pager-disabled" aria-disabled="true">Next →</span>}

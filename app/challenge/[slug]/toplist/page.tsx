@@ -30,14 +30,15 @@ export default async function Toplist({
   const isSearching = query.length > 0;
   const parsedPage = Number.parseInt(pageParam ?? "1", 10);
   if (isSearching) {
-    // Search needs the total match count for pagination; fetch ids only
-    // via a large window would still be slow, so cap the window.
-    const { items, total } = getTopSongs(challenge.id, { query, limit: TOP_LIMIT, offset: 0 });
+    // Search across the FULL ranking (no TOP_LIMIT cap): rank is global,
+    // so a song at #654 with 5 votes shows exactly that.
+    const searchPage = Number.isFinite(parsedPage) ? Math.max(parsedPage, 1) : 1;
+    const searchOffset = (searchPage - 1) * PAGE_SIZE;
+    const { items, total } = getTopSongs(challenge.id, { query, limit: PAGE_SIZE, offset: searchOffset });
     const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-    const page = Number.isFinite(parsedPage) ? Math.min(Math.max(parsedPage, 1), totalPages) : 1;
+    const page = Math.min(searchPage, totalPages);
     const startIndex = (page - 1) * PAGE_SIZE;
-    const pageItems = items.slice(startIndex, startIndex + PAGE_SIZE);
-    return renderToplist({ slug, challengeName: challenge.name, query, pageItems, total, page, totalPages, startIndex, isSearching: true });
+    return renderToplist({ slug, challengeName: challenge.name, query, pageItems: items, total, page, totalPages, startIndex, isSearching: true });
   }
   const page0 = Number.isFinite(parsedPage) ? Math.max(parsedPage, 1) : 1;
   const offset = (page0 - 1) * PAGE_SIZE;
@@ -72,7 +73,7 @@ function renderToplist({ slug, challengeName, query, pageItems, total, page, tot
   <SearchBox baseHref={baseHref} initialQuery={query} />
   <div className="card">
     {!ranked.length && <p className="muted">{isSearching ? "No songs match your search." : "No results yet."}</p>}
-    {ranked.map((r) => <div className="track result-track" key={`${r.artist}-${r.track}`}>{r.coverArtUrl ? <img className="result-art" src={r.coverArtUrl} alt="" width={56} height={56} loading="lazy" /> : <span className="result-art result-art-fallback" data-cover-id={r.recordingId ?? undefined} aria-hidden="true" />}<span><strong>#{r.rank} {r.track}</strong><br/><span className="muted">{r.artist}</span></span><strong>{r.count}</strong></div>)}
+    {ranked.map((r) => <div className="track result-track toplist-row" key={`${r.artist}-${r.track}`}><span className="toplist-rank">#{r.rank}</span>{r.coverArtUrl ? <img className="result-art" src={r.coverArtUrl} alt="" width={56} height={56} loading="lazy" /> : <span className="result-art result-art-fallback" data-cover-id={r.recordingId ?? undefined} aria-hidden="true" />}<span className="toplist-song"><strong>{r.track}</strong><span className="muted">{r.artist}</span></span><strong className="toplist-count">{r.count}</strong></div>)}
   </div>
   {missingIds.length > 0 && <CoverArtLoader ids={missingIds} />}
   {isSearching ? (totalPages > 1 && <nav className="pager" aria-label="Search result pages">
@@ -81,7 +82,7 @@ function renderToplist({ slug, challengeName, query, pageItems, total, page, tot
     <Link className={page >= totalPages ? "pager-btn pager-disabled" : "pager-btn"} aria-disabled={page >= totalPages} href={page >= totalPages ? pageHref(totalPages) : pageHref(page + 1)}>Next →</Link>
   </nav>) : ((page > 1 || hasNext) && <nav className="pager" aria-label="Top 500 pages">
     <Link className={page <= 1 ? "pager-btn pager-disabled" : "pager-btn"} aria-disabled={page <= 1} href={page <= 1 ? pageHref(1) : pageHref(page - 1)}>← Prev</Link>
-    <span className="muted">Page {page}</span>
+    <span className="pager-label">Page {page}</span>
     {hasNext
       ? <Link className="pager-btn" href={pageHref(page + 1)}>Next →</Link>
       : <span className="pager-btn pager-disabled" aria-disabled="true">Next →</span>}

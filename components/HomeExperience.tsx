@@ -202,7 +202,7 @@ export function HomeExperience({
     <section className="results-preview" aria-labelledby="results-title">
       <div className="section-heading compact"><p className="eyebrow">Leaderboard</p><h2 id="results-title">Top 5 results</h2>{challengeLinks[0] && <Link className="top-link" href={`/challenge/${challengeLinks[0].slug}/toplist`}>View full Top 500 →</Link>}</div>
       {!topResults.length && <p className="muted">No results yet.</p>}
-      {topResults.map((result, index) => <div className="result-row" key={`${result.artist}-${result.track}`}><span className="result-rank">{String(index + 1).padStart(2, "0")}</span>{result.coverArtUrl ? <Image className="result-art" src={result.coverArtUrl} alt="" width={56} height={56} /> : <span className="result-art result-art-fallback" data-cover-id={result.recordingId ?? undefined} aria-hidden="true" />}<span className="result-song"><strong>{result.track}</strong><small>{result.artist}</small></span><strong className="result-count">{result.count}</strong></div>)}
+      {topResults.map((result, index) => <div className="result-row" key={`${result.artist}-${result.track}`}><span className="result-rank">{String(index + 1)}</span>{result.coverArtUrl ? <Image className="result-art" src={result.coverArtUrl} alt="" width={70} height={70} /> : <span className="result-art result-art-fallback" data-cover-id={result.recordingId ?? undefined} aria-hidden="true" />}<span className="result-song"><strong>{result.track}</strong><small>{result.artist}</small></span><strong className="result-count">{result.count}</strong></div>)}
       {missingCoverArtIds && missingCoverArtIds.length > 0 && <CoverArtLoader ids={missingCoverArtIds} />}
     </section>
 

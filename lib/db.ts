@@ -330,8 +330,12 @@ export function getTopSongs(challengeId: string, options: { query?: string; limi
     )
   `).get(...(like ? [challengeId, like, like] : [challengeId])) as { n: number };
   const total = Number(countRow?.n ?? 0);
-  // Rank over the full (optionally filtered) set so search results keep
-  // their overall position. SQLite window function avoids loading all rows.
+  // Rank over the FULL unfiltered set, then apply the search filter on the
+  // outer query — so matches keep their global rank (e.g. #654) even when
+  // they sit outside the Top 500.
+  const outerFilter = like
+    ? `AND (LOWER(artist) LIKE ? ESCAPE '\\' OR LOWER(track) LIKE ? ESCAPE '\\')`
+    : "";
   const items = db.prepare(`
     SELECT artist, track, recording_id as recordingId, artist_id as artistId, count, rank FROM (
       SELECT
@@ -343,9 +347,10 @@ export function getTopSongs(challengeId: string, options: { query?: string; limi
         ROW_NUMBER() OVER (ORDER BY COUNT(*) DESC, st.musicbrainz_artist_name ASC, st.musicbrainz_track_name ASC) as rank
       FROM submission_tracks st
       JOIN submissions s ON s.id = st.submission_id
-      WHERE s.challenge_id = ? AND ${CANONICAL_FILTER} ${whereQuery}
+      WHERE s.challenge_id = ? AND ${CANONICAL_FILTER}
       GROUP BY st.musicbrainz_recording_id
     )
+    WHERE 1 = 1 ${outerFilter}
     ORDER BY rank ASC
     LIMIT ? OFFSET ?
   `).all(...(like ? [challengeId, like, like, options.limit, options.offset] : [challengeId, options.limit, options.offset])) as Array<TopSong & { rank: number; count: number }>;
