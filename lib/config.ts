@@ -17,6 +17,7 @@ function positiveInteger(name: string, fallback: number) {
 export const config = {
   get spotifyConfigured() { return configured("SPOTIFY_CLIENT_ID", "SPOTIFY_CLIENT_SECRET", "SPOTIFY_REDIRECT_URI"); },
   get youtubeConfigured() { return configured("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REDIRECT_URI"); },
+  get tidalConfigured() { return configured("TIDAL_CLIENT_ID", "TIDAL_CLIENT_SECRET", "TIDAL_REDIRECT_URI"); },
   get appUrl() { return required("NEXT_PUBLIC_APP_URL"); },
   get spotifyClientId() { return required("SPOTIFY_CLIENT_ID"); },
   get spotifyClientSecret() { return required("SPOTIFY_CLIENT_SECRET"); },
@@ -24,6 +25,9 @@ export const config = {
   get googleClientId() { return required("GOOGLE_CLIENT_ID"); },
   get googleClientSecret() { return required("GOOGLE_CLIENT_SECRET"); },
   get googleRedirectUri() { return required("GOOGLE_REDIRECT_URI"); },
+  get tidalClientId() { return required("TIDAL_CLIENT_ID"); },
+  get tidalClientSecret() { return required("TIDAL_CLIENT_SECRET"); },
+  get tidalRedirectUri() { return required("TIDAL_REDIRECT_URI"); },
   get participantKeySecret() { return required("PARTICIPANT_KEY_SECRET"); },
   get musicBrainzUserAgent() { return required("MUSICBRAINZ_USER_AGENT"); },
   get musicBrainzContactEmail() { return process.env.MUSICBRAINZ_CONTACT_EMAIL ?? ""; },

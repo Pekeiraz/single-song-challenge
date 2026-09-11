@@ -1,42 +1,60 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getChallengeBySlug, getResultRows } from "@/lib/db";
-import { getCoverArtUrl } from "@/lib/cover-art";
-import { getCanonicalResultRows } from "@/lib/musicbrainz";
+import { getArtistGroups, getArtistSongs, getChallengeBySlug } from "@/lib/db";
+import { getCachedCoverArtUrls } from "@/lib/cover-art";
+import { CoverArtLoader } from "@/components/CoverArtLoader";
+import { SearchBox } from "@/components/SearchBox";
 import { SiteNav } from "@/components/SiteNav";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export default async function Results({ params }: { params: Promise<{ slug: string }> }) {
+const ARTISTS_PER_PAGE = 20;
+
+export default async function Results({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ slug: string }>;
+  searchParams?: Promise<{ page?: string; q?: string }>;
+}) {
   const { slug } = await params;
+  const { page: pageParam, q: qParam } = (await searchParams) ?? {};
+  const query = (qParam ?? "").trim();
   const challenge = getChallengeBySlug(slug);
   if (!challenge) notFound();
 
-  const rows = await getCanonicalResultRows(getResultRows(challenge.id));
-  const counts = new Map<string, { artist: string; track: string; musicbrainzRecordingId: string | null; count: number }>();
-  for (const row of rows) {
-    const artistKey = row.musicbrainz_artist_id ?? `name:${row.artist_name.toLocaleLowerCase("de-DE")}`;
-    const trackKey = row.musicbrainz_recording_id ?? `${row.track_name.toLocaleLowerCase("de-DE")}`;
-    const key = `${artistKey}::${trackKey}`;
-    const current = counts.get(key) ?? { artist: row.artist_name, track: row.track_name, musicbrainzRecordingId: row.musicbrainz_recording_id, count: 0 };
-    current.count++;
-    counts.set(key, current);
-  }
-
-  const sorted = [...counts.values()].sort((a,b) => b.count-a.count || a.artist.localeCompare(b.artist));
-  // Fetch cover art in small batches to avoid hammering MusicBrainz/CAA
-  // with 100+ concurrent requests (caused fetch failures / 500s).
-  const ranked: Array<(typeof sorted)[number] & { coverArtUrl: string | null }> = [];
-  for (let i = 0; i < sorted.length; i += 10) {
-    const chunk = sorted.slice(i, i + 10);
-    const withArt = await Promise.all(chunk.map(async (result) => ({
-      ...result,
-      coverArtUrl: await getCoverArtUrl(result.musicbrainzRecordingId),
-    })));
-    ranked.push(...withArt);
-  }
-  return <main className="home-shell"><SiteNav active="results" resultsHref={`/challenge/${slug}/results`} /><div className="container"><h1>{challenge.name}: Results</h1><div className="card">
-    {!ranked.length && <p className="muted">No results yet.</p>}
-    {ranked.map((r,i) => <div className="track result-track" key={`${r.artist}-${r.track}`}>{r.coverArtUrl ? <img className="result-art" src={r.coverArtUrl} alt="" width={56} height={56} loading="lazy" /> : <span className="result-art result-art-fallback" aria-hidden="true" />}<span><strong>#{i+1} {r.track}</strong><br/><span className="muted">{r.artist}</span></span><strong>{r.count}</strong></div>)}
-  </div></div></main>;
+  // DB-only read path: SQL GROUP BY + LIMIT/OFFSET, no MusicBrainz calls.
+  const parsedPage = Number.parseInt(pageParam ?? "1", 10);
+  const page0 = Number.isFinite(parsedPage) ? Math.max(parsedPage, 1) : 1;
+  const offset = (page0 - 1) * ARTISTS_PER_PAGE;
+  // One extra group to detect a next page without COUNT(*) on every load.
+  const { groups, totalArtists, totalSongs } = getArtistGroups(challenge.id, { query, limit: ARTISTS_PER_PAGE + 1, offset });
+  const hasNext = groups.length > ARTISTS_PER_PAGE;
+  const pageGroups = groups.slice(0, ARTISTS_PER_PAGE);
+  const songsByArtist = getArtistSongs(challenge.id, pageGroups.map((g) => g.artistKey));
+  const pageArtists = pageGroups.map((g) => ({ ...g, songs: songsByArtist.get(g.artistKey) ?? [] }));
+  // DB-cached cover art only — never blocks on the network.
+  const artIds = [...new Set(pageArtists.flatMap((a) => a.songs.map((s) => s.recordingId)).filter((id): id is string => !!id))];
+  const artMap = getCachedCoverArtUrls(artIds);
+  const missingIds = artIds.filter((id) => !artMap.has(id));
+  const endIndex = offset + pageArtists.length;
+  const baseHref = `/challenge/${slug}/results`;
+  const topHref = `/challenge/${slug}/toplist`;
+  const pageHref = (n: number) => query ? `${baseHref}?page=${n}&q=${encodeURIComponent(query)}` : `${baseHref}?page=${n}`;
+  return <main className="home-shell"><SiteNav active="results" resultsHref={baseHref} topHref={topHref} /><div className="container"><h1>{challenge.name}: Results</h1><p className="muted">{totalArtists ? `${totalArtists} artists · ${totalSongs} songs${query ? ` · filter “${query}”` : ""} · showing artists ${offset + 1}–${endIndex}` : query ? `No artists match “${query}”.` : "No results yet."}</p>
+  <SearchBox baseHref={baseHref} initialQuery={query} />
+  {!pageArtists.length && <div className="card"><p className="muted">{query ? "No artists match your search." : "No results yet."}</p></div>}
+  {pageArtists.map((a) => <section className="card artist-card" key={a.artistKey} aria-label={a.artist}>
+    <header className="artist-header"><h2>{a.artist}</h2><span className="muted">{a.songs.length} {a.songs.length === 1 ? "song" : "songs"} · {a.totalVotes} {a.totalVotes === 1 ? "vote" : "votes"}</span></header>
+    {a.songs.map((s) => { const coverArtUrl = s.recordingId ? artMap.get(s.recordingId) ?? null : null; return <div className="track result-track" key={`${a.artistKey}-${s.track}`}>{coverArtUrl ? <img className="result-art" src={coverArtUrl} alt="" width={56} height={56} loading="lazy" /> : <span className="result-art result-art-fallback" data-cover-id={s.recordingId ?? undefined} aria-hidden="true" />}<span><strong>{s.track}</strong></span><strong>{s.count}×</strong></div>; })}
+  </section>)}
+  {missingIds.length > 0 && <CoverArtLoader ids={missingIds} />}
+  {(page0 > 1 || hasNext) && <nav className="pager" aria-label="Artist pages">
+    <Link className={page0 <= 1 ? "pager-btn pager-disabled" : "pager-btn"} aria-disabled={page0 <= 1} href={page0 <= 1 ? pageHref(1) : pageHref(page0 - 1)}>← Prev</Link>
+    <span className="muted">Page {page0}</span>
+    {hasNext
+      ? <Link className="pager-btn" href={pageHref(page0 + 1)}>Next →</Link>
+      : <span className="pager-btn pager-disabled" aria-disabled="true">Next →</span>}
+  </nav>}</div></main>;
 }

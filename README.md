@@ -8,6 +8,7 @@ Ein kleines Next.js-MVP für Playlist-Challenges ohne Supabase und ohne eigene B
 - **SQLite direkt über `node:sqlite`** – keine native npm-Datenbankabhängigkeit
 - Spotify OAuth
 - YouTube/Google OAuth
+- Tidal OAuth
 - MusicBrainz als externe Musikdatenbank zum Matching
 - lokaler YouTube-Playlist-Cache zur Quota-Schonung
 
@@ -65,6 +66,10 @@ GOOGLE_CLIENT_ID=...
 GOOGLE_CLIENT_SECRET=...
 GOOGLE_REDIRECT_URI=http://127.0.0.1:3000/api/youtube/callback
 
+TIDAL_CLIENT_ID=...
+TIDAL_CLIENT_SECRET=...
+TIDAL_REDIRECT_URI=http://127.0.0.1:3000/api/tidal/callback
+
 PARTICIPANT_KEY_SECRET=...
 
 MUSICBRAINZ_USER_AGENT=PlaylistChallenge/0.2.0 (https://example.com/contact)
@@ -93,6 +98,14 @@ In Google Cloud:
    `http://127.0.0.1:3000/api/youtube/callback`
 
 Der YouTube-Flow verwendet `youtube.readonly`.
+
+## Tidal
+
+Im Tidal Developer Dashboard muss als Redirect URI exakt folgende lokale Adresse stehen:
+
+`http://127.0.0.1:3000/api/tidal/callback`
+
+Der Tidal-Flow verwendet PKCE sowie die Scopes `playlists.read` und `user.read`.
 
 YouTube-Playlist-Items werden gesammelt und für eine begrenzte Zeit lokal gecacht. Dadurch löst das wiederholte Einreichen derselben Playlist keine unnötigen API-Aufrufe aus. Die Items werden anschließend lokal geparst und gegen MusicBrainz gematcht.
 

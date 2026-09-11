@@ -2,11 +2,14 @@ import Link from "next/link";
 
 export function SiteNav({
   resultsHref = "/",
+  topHref,
   active = "home",
 }: {
   resultsHref?: string;
-  active?: "home" | "results";
+  topHref?: string;
+  active?: "home" | "results" | "top";
 }) {
+  const topLink = topHref ?? resultsHref;
   return (
     <nav className="site-nav" aria-label="Main navigation">
       <Link className="brand-mark" href="/">
@@ -21,6 +24,12 @@ export function SiteNav({
           className={active === "results" ? "active" : undefined}
         >
           Results
+        </Link>
+        <Link
+          href={topLink}
+          className={active === "top" ? "active" : undefined}
+        >
+          Toplist
         </Link>
       </div>
     </nav>

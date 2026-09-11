@@ -1,8 +1,8 @@
 import crypto from "node:crypto";
 import { config } from "@/lib/config";
 
-export type OAuthProvider = "spotify" | "youtube";
-export type OAuthState = { provider: OAuthProvider; challengeId: string; playlistId: string; nonce: string; iat: number; exp: number };
+export type OAuthProvider = "spotify" | "youtube" | "tidal";
+export type OAuthState = { provider: OAuthProvider; challengeId: string; playlistId: string; nonce: string; iat: number; exp: number; codeVerifier?: string };
 
 const usedNonces = new Map<string, number>();
 

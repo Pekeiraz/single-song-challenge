@@ -13,6 +13,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "db:seed": "node --experimental-strip-types --experimental-specifier-resolution=node scripts/seed.ts",
+    "db:match-once": "node --env-file=.env.local --experimental-strip-types --experimental-specifier-resolution=node scripts/match-worker.ts",
+    "db:match-loop": "node --env-file=.env.local --experimental-strip-types --experimental-specifier-resolution=node scripts/match-worker.ts --loop",
     "db:rematch": "node --env-file=.env.local --experimental-strip-types --experimental-specifier-resolution=node scripts/rematch.mjs",
     "db:backfill-canonical": "node --env-file=.env.local --experimental-strip-types --experimental-specifier-resolution=node scripts/backfill-canonical.mjs",
     "debug:mb": "node --env-file=.env.local scripts/debug-match.mjs"

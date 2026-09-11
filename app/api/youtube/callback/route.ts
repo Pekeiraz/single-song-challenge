@@ -1,10 +1,8 @@
-import { after } from "next/server";
 import { NextRequest, NextResponse } from "next/server";
 import { config } from "@/lib/config";
 import { getCachedYouTubePlaylist, getChallengeById, replaceSubmission, upsertYouTubePlaylistCache } from "@/lib/db";
 import { participantKey } from "@/lib/participant";
 import { readOAuthState } from "@/lib/oauth-state";
-import { enrichSubmissionTracks } from "@/lib/submission-enrichment";
 import { clientAddress, rateLimit } from "@/lib/rate-limit";
 import { exchangeYouTubeCode, getYouTubeCurrentChannel, getYouTubePlaylist, getYouTubePlaylistItems, youtubeVideoTitleToArtistTrack } from "@/lib/youtube";
 
@@ -110,7 +108,8 @@ export async function GET(request: NextRequest) {
       snapshotId: null,
       tracks: rows,
     });
-    after(() => enrichSubmissionTracks(result.submissionId, rows));
+    // Matching is decoupled: a background worker (npm run db:match-once)
+    // picks up unmatched tracks. Never block the request on MusicBrainz.
 
     const notice = result.replaced ? "Deine bisherige Einreichung wurde ersetzt." : "Deine Playlist wurde erfolgreich eingereicht.";
     const response = NextResponse.redirect(new URL(`/?notice=${encodeURIComponent(notice)}`, request.url));
