@@ -1,5 +1,5 @@
-import { config } from "@/lib/config";
-import type { ResultRow } from "@/lib/db";
+import { config } from "./config.ts";
+import type { ResultRow } from "./db.ts";
 
 const BASE = "https://musicbrainz.org/ws/2";
 const MIN_REQUEST_INTERVAL_MS = 1500;

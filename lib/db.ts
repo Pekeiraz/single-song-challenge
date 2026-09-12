@@ -250,6 +250,36 @@ export function replaceSubmission(input: SubmissionInput) {
     }
 
     const current = db.prepare(`SELECT id FROM submissions WHERE challenge_id = ? AND participant_key = ?`).get(input.challengeId, input.participantKey) as {id: string} | undefined;
+    // Snapshot old match results before delete so resubmissions only
+    // re-queue tracks that actually changed (same provider_track_id +
+    // same names/isrc => carry over the previous MusicBrainz result).
+    const oldByProviderTrackId = new Map<string, Array<{
+      track_name: string; artist_name: string; provider_artist_id: string | null; isrc: string | null;
+      musicbrainz_recording_id: string | null; musicbrainz_artist_id: string | null; musicbrainz_match_method: string | null;
+      musicbrainz_track_name: string | null; musicbrainz_artist_name: string | null; musicbrainz_match_status: string;
+      musicbrainz_match_confidence: number | null; musicbrainz_candidates_json: string | null; musicbrainz_match_error: string | null;
+    }>>();
+    if (current) {
+      const oldRows = db.prepare(`
+        SELECT track_name, artist_name, provider_artist_id, isrc,
+               provider_track_id,
+               musicbrainz_recording_id, musicbrainz_artist_id, musicbrainz_match_method,
+               musicbrainz_track_name, musicbrainz_artist_name, musicbrainz_match_status,
+               musicbrainz_match_confidence, musicbrainz_candidates_json, musicbrainz_match_error
+        FROM submission_tracks WHERE submission_id = ?
+      `).all(current.id) as Array<{
+        track_name: string; artist_name: string; provider_artist_id: string | null; isrc: string | null;
+        provider_track_id: string;
+        musicbrainz_recording_id: string | null; musicbrainz_artist_id: string | null; musicbrainz_match_method: string | null;
+        musicbrainz_track_name: string | null; musicbrainz_artist_name: string | null; musicbrainz_match_status: string;
+        musicbrainz_match_confidence: number | null; musicbrainz_candidates_json: string | null; musicbrainz_match_error: string | null;
+      }>;
+      for (const row of oldRows) {
+        const list = oldByProviderTrackId.get(row.provider_track_id) ?? [];
+        list.push(row);
+        oldByProviderTrackId.set(row.provider_track_id, list);
+      }
+    }
     if (current) db.prepare("DELETE FROM submissions WHERE id = ?").run(current.id);
 
     const submissionId = newId();
@@ -260,15 +290,42 @@ export function replaceSubmission(input: SubmissionInput) {
 
     const insertTrack = db.prepare(`
       INSERT INTO submission_tracks
-      (id,submission_id,position,provider_track_id,track_name,artist_name,provider_artist_id,isrc,musicbrainz_recording_id,musicbrainz_artist_id,musicbrainz_match_method)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?)
+      (id,submission_id,position,provider_track_id,track_name,artist_name,provider_artist_id,isrc,musicbrainz_recording_id,musicbrainz_artist_id,musicbrainz_match_method,musicbrainz_track_name,musicbrainz_artist_name,musicbrainz_match_status,musicbrainz_match_confidence,musicbrainz_candidates_json,musicbrainz_match_error)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `);
+    let reused = 0;
     for (const track of input.tracks) {
-      insertTrack.run(newId(), submissionId, track.position, track.providerTrackId, track.trackName, track.artistName, track.providerArtistId, track.isrc, track.musicbrainzRecordingId, track.musicbrainzArtistId, track.musicbrainzMatchMethod);
+      const candidates = oldByProviderTrackId.get(track.providerTrackId);
+      let carried: {
+        musicbrainz_recording_id: string | null; musicbrainz_artist_id: string | null; musicbrainz_match_method: string | null;
+        musicbrainz_track_name: string | null; musicbrainz_artist_name: string | null; musicbrainz_match_status: string;
+        musicbrainz_match_confidence: number | null; musicbrainz_candidates_json: string | null; musicbrainz_match_error: string | null;
+      } | null = null;
+      if (candidates?.length) {
+        const idx = candidates.findIndex((old) =>
+          old.track_name === track.trackName &&
+          old.artist_name === track.artistName &&
+          (old.isrc ?? null) === (track.isrc ?? null) &&
+          (old.provider_artist_id ?? null) === (track.providerArtistId ?? null),
+        );
+        if (idx >= 0) {
+          const [old] = candidates.splice(idx, 1);
+          const attempted = old.musicbrainz_recording_id !== null || old.musicbrainz_match_confidence !== null || old.musicbrainz_candidates_json !== null;
+          if (attempted) {
+            carried = old;
+            reused++;
+          }
+        }
+      }
+      if (carried) {
+        insertTrack.run(newId(), submissionId, track.position, track.providerTrackId, track.trackName, track.artistName, track.providerArtistId, track.isrc, carried.musicbrainz_recording_id, carried.musicbrainz_artist_id, carried.musicbrainz_match_method, carried.musicbrainz_track_name, carried.musicbrainz_artist_name, carried.musicbrainz_match_status, carried.musicbrainz_match_confidence, carried.musicbrainz_candidates_json, carried.musicbrainz_match_error);
+      } else {
+        insertTrack.run(newId(), submissionId, track.position, track.providerTrackId, track.trackName, track.artistName, track.providerArtistId, track.isrc, track.musicbrainzRecordingId, track.musicbrainzArtistId, track.musicbrainzMatchMethod, null, null, "unmatched", null, null, null);
+      }
     }
 
     db.exec("COMMIT");
-    return { submissionId, replaced: Boolean(current) };
+    return { submissionId, replaced: Boolean(current), reused, queued: input.tracks.length - reused };
   } catch (error) {
     try { db.exec("ROLLBACK"); } catch {}
     throw error;

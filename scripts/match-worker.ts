@@ -1,5 +1,5 @@
-import { matchRecording } from "@/lib/musicbrainz";
-import { countPendingMatchTracks, getPendingMatchTracks, recordMatchError, updateSubmissionTrackMatches } from "@/lib/db";
+import { matchRecording } from "../lib/musicbrainz.ts";
+import { countPendingMatchTracks, getPendingMatchTracks, recordMatchError, updateSubmissionTrackMatches } from "../lib/db.ts";
 
 const BATCH = Number.parseInt(process.argv.find((a) => /^\d+$/.test(a)) ?? "", 10) || 50;
 const LOOP = process.argv.includes("--loop");

@@ -1,5 +1,5 @@
-import { matchRecording } from "@/lib/musicbrainz";
-import { updateSubmissionTrackMatches } from "@/lib/db";
+import { matchRecording } from "./musicbrainz.ts";
+import { updateSubmissionTrackMatches } from "./db.ts";
 
 export async function enrichSubmissionTracks(submissionId: string, tracks: Array<{ position: number; trackName: string; artistName: string; isrc?: string | null }>) {
   for (const track of tracks) {
