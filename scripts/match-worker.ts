@@ -1,3 +1,4 @@
+import { fetchAndCacheCoverArt } from "../lib/cover-art.ts";
 import { matchRecording } from "../lib/musicbrainz.ts";
 import { countPendingMatchTracks, getPendingMatchTracks, recordMatchError, updateSubmissionTrackMatches } from "../lib/db.ts";
 
@@ -24,7 +25,11 @@ async function processBatch(): Promise<number> {
         match?.status ?? "unmatched",
         match?.confidence ?? null,
         match?.candidates ? JSON.stringify(match.candidates) : null,
+        match && "workId" in match ? match.workId ?? null : null,
       );
+      if (match?.status === "matched" && match.recordingId) {
+        await fetchAndCacheCoverArt(match.recordingId);
+      }
       if (match?.status === "matched") matched++;
       console.log(`[match-worker] ${match?.status ?? "error"}: ${track.artist_name} - ${track.track_name}`);
     } catch (error) {

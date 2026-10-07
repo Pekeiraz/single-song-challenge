@@ -57,7 +57,6 @@ export function SubmitForm({ challengeId, providers }: { challengeId: string; pr
   }
 
   return <div className="card">
-    <h2>Submit a playlist</h2>
     <p className="muted">You do not need an account here. Your music provider will handle authentication.</p>
     <form onSubmit={submit} noValidate>
       <input value={url} onChange={(e) => { setUrl(e.target.value); if (hasError) setHasError(false); }} placeholder="Paste a Spotify, YouTube, or Tidal playlist link…" aria-invalid={hasError} style={hasError ? { borderColor: "#e5484d" } : undefined} />

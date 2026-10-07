@@ -13,6 +13,8 @@ type ArtistCredit = { name?: string; artist?: { id?: string; name?: string } };
 type Recording = { id: string; title?: string; score?: number; "artist-credit"?: ArtistCredit[] };
 type RecordingSearchResponse = { recordings?: Recording[] };
 type RecordingDetails = { title?: string; "artist-credit"?: ArtistCredit[] };
+type WorkRelation = { "target-type"?: string; type?: string; work?: { id?: string } };
+type RecordingWithWorks = { relations?: WorkRelation[] };
 
 async function waitForRequestSlot() {
   await new Promise<void>((resolve) => {
@@ -75,6 +77,20 @@ export async function getRecordingDetails(recordingId: string) {
   };
 }
 
+/** Resolve the composition (work) for a recording. Returns null when
+ *  MusicBrainz has no performance relation (e.g. some live/bootleg rows). */
+export async function getRecordingWorkId(recordingId: string): Promise<string | null> {
+  try {
+    const data = await mbFetch<RecordingWithWorks>(`/recording/${encodeURIComponent(recordingId)}?inc=work-rels`);
+    for (const rel of data.relations ?? []) {
+      if (rel["target-type"] === "work" && rel.work?.id) return rel.work.id;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export async function getCanonicalResultRows(rows: ResultRow[]) {
   const canonicalRows: ResultRow[] = [];
   for (const row of rows) {
@@ -104,6 +120,13 @@ function normalizeArtist(value: string) {
   return normalize(value).split(" ").filter(Boolean).sort().join(" ");
 }
 
+function artistQueryVariants(artist: string) {
+  const variants = [`artist:"${escapeLucene(artist)}"`];
+  const tokens = normalize(artist).split(" ").filter(Boolean);
+  if (tokens.length > 1) variants.push(tokens.map((token) => `artist:${escapeLucene(token)}`).join(" AND "));
+  return variants;
+}
+
 function searchVariants(value: string) {
   const variants = [value];
   const partMatch = value.match(/\b(?:pt|part)\.?\s+(\d+)\b/i);
@@ -119,10 +142,10 @@ function searchVariants(value: string) {
 function searchValue(value: string) {
   return value
     .replace(/\s+-\s+Topic\s*$/i, "")
-    .replace(/\s*[\(\[]\s*(?:\d{4}\s+)?(?:remaster(?:ed)?|remix|mono|stereo|single version|anniversary(?: edition)?|deluxe(?: edition)?|explicit|clean|radio edit)[^)\]]*[\)\]]\s*$/i, "")
+    .replace(/\s*[\(\[]\s*(?:\d{4}\s+)?(?:new version|remaster(?:ed)?|remix|mono|stereo|single version|anniversary(?: edition)?|deluxe(?: edition)?|explicit|clean|radio edit)[^)\]]*[\)\]]\s*$/i, "")
     .replace(/\s*\((?:official\s+)?(?:video|audio|lyrics?|live|remaster(?:ed)?|single version)[^)]*\)\s*$/i, "")
     .replace(/\s*[\(\[]\s*(?:feat\.?|ft\.?|featuring|with)\s+[^)\]]+[\)\]]\s*$/i, "")
-    .replace(/\s+(?:feat\.?|ft\.?|featuring|with)\s+.+$/i, "")
+    .replace(/\s+(?:feat\.?|ft\.?|featuring)\s+.+$/i, "")
     .replace(/\s*\(\s*\d{4}\s*\)\s*$/g, "")
     .replace(/\s*\(\s*\)\s*$/g, "")
     .trim();
@@ -179,6 +202,7 @@ export async function matchRecording(input: { title: string; artist: string; isr
     if (first) return {
       recordingId: first.id,
       artistId: first["artist-credit"]?.[0]?.artist?.id ?? null,
+      workId: await getRecordingWorkId(first.id),
       trackName: first.title ?? null,
       artistName: first["artist-credit"]?.map((credit) => credit.name ?? credit.artist?.name ?? "").join(" & ") ?? null,
       method: "isrc",
@@ -192,9 +216,12 @@ export async function matchRecording(input: { title: string; artist: string; isr
   const artist = searchValue(input.artist);
   const candidates: Recording[] = [];
   for (const titleVariant of searchVariants(title)) {
-    const q = `recording:"${escapeLucene(titleVariant)}" AND artist:${normalize(artist).split(" ").join(" AND artist:")}`;
-    const data = await mbFetch<RecordingSearchResponse>(`/recording?query=${encodeURIComponent(q)}&limit=25`);
-    candidates.push(...(data.recordings ?? []));
+    for (const artistQuery of artistQueryVariants(artist)) {
+      const q = `recording:"${escapeLucene(titleVariant)}" AND ${artistQuery}`;
+      const data = await mbFetch<RecordingSearchResponse>(`/recording?query=${encodeURIComponent(q)}&limit=25`);
+      candidates.push(...(data.recordings ?? []));
+      if (candidates.length) break;
+    }
     if (candidates.length) break;
   }
   if (!candidates.length) {
@@ -216,13 +243,22 @@ export async function matchRecording(input: { title: string; artist: string; isr
     return { status: "unmatched" as const, confidence: Number(best.total.toFixed(3)), candidates: candidateSummaries };
   }
   const exactTitleAndArtist = best.titleScore === 1 && best.artistScore === 1;
+  let sameWork = false;
   if (!exactTitleAndArtist && runnerUp && best.total - runnerUp.total < 0.08 && runnerUp.artistScore >= 0.55) {
+    const [bestWorkId, runnerUpWorkId] = await Promise.all([
+      getRecordingWorkId(best.candidate.id),
+      getRecordingWorkId(runnerUp.candidate.id),
+    ]);
+    sameWork = !!bestWorkId && bestWorkId === runnerUpWorkId;
+  }
+  if (!exactTitleAndArtist && runnerUp && best.total - runnerUp.total < 0.08 && runnerUp.artistScore >= 0.55 && !sameWork) {
     return { status: "ambiguous" as const, confidence: Number(best.total.toFixed(3)), candidates: candidateSummaries };
   }
   const first = best.candidate;
   return {
     recordingId: first.id,
     artistId: first["artist-credit"]?.[0]?.artist?.id ?? null,
+    workId: await getRecordingWorkId(first.id),
     trackName: first.title ?? null,
     artistName: first["artist-credit"]?.map((credit) => credit.name ?? credit.artist?.name ?? "").join(" & ") ?? null,
     method: `search:${best.total.toFixed(2)}`,

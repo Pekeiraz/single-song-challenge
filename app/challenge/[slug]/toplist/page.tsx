@@ -69,22 +69,29 @@ function renderToplist({ slug, challengeName, query, pageItems, total, page, tot
   const heading = isSearching
     ? (total === 0 ? `No matches for “${query}”.` : `${total} ${total === 1 ? "match" : "matches"} for “${query}” · overall rank shown`)
     : (ranked.length || startIndex > 0 ? `Showing ${startIndex + 1}–${endIndex}` : "No results yet.");
-  return <main className="home-shell"><SiteNav active="top" resultsHref={resultsHref} topHref={baseHref} /><div className="container"><h1>{challengeName}: Top 500</h1><p className="muted">{heading}</p>
+  const showPager = isSearching ? totalPages > 1 : page > 1 || hasNext;
+  // Text-only pager: < | 100 | 200 | ... | > with muted dividers between items.
+  const atLastPage = isSearching ? page >= totalPages : !hasNext;
+  const pagerItems = [
+    <Link key="prev" className={page <= 1 ? "pager-link pager-disabled" : "pager-link"} aria-disabled={page <= 1} href={page <= 1 ? pageHref(1) : pageHref(page - 1)}>&lt;</Link>,
+    ...(isSearching
+      ? Array.from({ length: totalPages }, (_, n) => n + 1)
+      : Array.from({ length: TOP_LIMIT / PAGE_SIZE }, (_, n) => n + 1)
+    ).map((n) => <Link key={n} href={pageHref(n)} aria-current={n === page ? "page" : undefined} className={n === page ? "pager-link pager-current" : "pager-link"}>{isSearching ? n : n * PAGE_SIZE}</Link>),
+    isSearching || hasNext
+      ? <Link key="next" className={atLastPage ? "pager-link pager-disabled" : "pager-link"} aria-disabled={atLastPage} href={atLastPage ? pageHref(isSearching ? totalPages : page) : pageHref(page + 1)}>&gt;</Link>
+      : <span key="next" className="pager-link pager-disabled" aria-disabled="true">&gt;</span>,
+  ];
+  const separatedItems = pagerItems.flatMap((item, i) =>
+    i === 0 ? [item] : [<span key={`sep-${i}`} className="pager-sep" aria-hidden="true">|</span>, item]);
+  const pager = showPager ? <nav className="pager pager-text" aria-label={isSearching ? "Search result pages" : "Top 500 pages"}>{separatedItems}</nav> : null;
+  return <main className="home-shell"><SiteNav active="top" resultsHref={resultsHref} topHref={baseHref} /><div className="container"><h1>{challengeName}: Top 500</h1>
+  <div className="toplist-meta"><p className="muted">{heading}</p>{pager}</div>
   <SearchBox baseHref={baseHref} initialQuery={query} />
   <div className="card">
     {!ranked.length && <p className="muted">{isSearching ? "No songs match your search." : "No results yet."}</p>}
     {ranked.map((r) => <div className="track result-track toplist-row" key={`${r.artist}-${r.track}`}><span className="toplist-rank">#{r.rank}</span>{r.coverArtUrl ? <img className="result-art" src={r.coverArtUrl} alt="" width={56} height={56} loading="lazy" /> : <span className="result-art result-art-fallback" data-cover-id={r.recordingId ?? undefined} aria-hidden="true" />}<span className="toplist-song"><strong>{r.track}</strong><span className="muted">{r.artist}</span></span><strong className="toplist-count">{r.count}</strong></div>)}
   </div>
   {missingIds.length > 0 && <CoverArtLoader ids={missingIds} />}
-  {isSearching ? (totalPages > 1 && <nav className="pager" aria-label="Search result pages">
-    <Link className={page <= 1 ? "pager-btn pager-disabled" : "pager-btn"} aria-disabled={page <= 1} href={page <= 1 ? pageHref(1) : pageHref(page - 1)}>← Prev</Link>
-    {Array.from({ length: totalPages }, (_, n) => n + 1).map((n) => <Link key={n} href={pageHref(n)} aria-current={n === page ? "page" : undefined} className={n === page ? "pager-btn pager-current" : "pager-btn"}>{n}</Link>)}
-    <Link className={page >= totalPages ? "pager-btn pager-disabled" : "pager-btn"} aria-disabled={page >= totalPages} href={page >= totalPages ? pageHref(totalPages) : pageHref(page + 1)}>Next →</Link>
-  </nav>) : ((page > 1 || hasNext) && <nav className="pager" aria-label="Top 500 pages">
-    <Link className={page <= 1 ? "pager-btn pager-disabled" : "pager-btn"} aria-disabled={page <= 1} href={page <= 1 ? pageHref(1) : pageHref(page - 1)}>← Prev</Link>
-    <span className="pager-label">Page {page}</span>
-    {hasNext
-      ? <Link className="pager-btn" href={pageHref(page + 1)}>Next →</Link>
-      : <span className="pager-btn pager-disabled" aria-disabled="true">Next →</span>}
-  </nav>)}</div></main>;
+  {pager && <div className="toplist-nav-bottom">{pager}</div>}</div></main>;
 }

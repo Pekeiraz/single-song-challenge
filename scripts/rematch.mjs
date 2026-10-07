@@ -44,6 +44,13 @@ function normalizeArtist(value) {
   return normalize(value).split(" ").filter(Boolean).sort().join(" ");
 }
 
+function artistQueryVariants(artist) {
+  const variants = [`artist:"${escapeLucene(artist)}"`];
+  const tokens = normalize(artist).split(" ").filter(Boolean);
+  if (tokens.length > 1) variants.push(tokens.map((token) => `artist:${escapeLucene(token)}`).join(" AND "));
+  return variants;
+}
+
 function searchVariants(value) {
   const variants = [value];
   const partMatch = value.match(/\b(?:pt|part)\.?\s+(\d+)\b/i);
@@ -58,10 +65,10 @@ function searchVariants(value) {
 
 function searchValue(value) {
   return value.replace(/\s+-\s+Topic\s*$/i, "")
-    .replace(/\s*[\(\[]\s*(?:\d{4}\s+)?(?:remaster(?:ed)?|remix|mono|stereo|single version|anniversary(?: edition)?|deluxe(?: edition)?|explicit|clean|radio edit)[^)\]]*[\)\]]\s*$/i, "")
+    .replace(/\s*[\(\[]\s*(?:\d{4}\s+)?(?:new version|remaster(?:ed)?|remix|mono|stereo|single version|anniversary(?: edition)?|deluxe(?: edition)?|explicit|clean|radio edit)[^)\]]*[\)\]]\s*$/i, "")
     .replace(/\s*\((?:official\s+)?(?:video|audio|lyrics?|live|remaster(?:ed)?|single version)[^)]*\)\s*$/i, "")
     .replace(/\s*[\(\[]\s*(?:feat\.?|ft\.?|featuring|with)\s+[^)\]]+[\)\]]\s*$/i, "")
-    .replace(/\s+(?:feat\.?|ft\.?|featuring|with)\s+.+$/i, "")
+    .replace(/\s+(?:feat\.?|ft\.?|featuring)\s+.+$/i, "")
     .replace(/\s*\(\s*\d{4}\s*\)\s*$/g, "")
     .replace(/\s*\(\s*\)\s*$/g, "")
     .trim();
@@ -105,6 +112,18 @@ function summary(candidate, value) {
   return { recordingId: candidate.id, title: candidate.title ?? null, artist: (candidate["artist-credit"] ?? []).map((credit) => credit.name ?? credit.artist?.name ?? "").join(" & ") || null, score: Number(value.total.toFixed(3)) };
 }
 
+async function getRecordingWorkId(recordingId) {
+  try {
+    const data = await mbFetch(`/recording/${encodeURIComponent(recordingId)}?inc=work-rels`);
+    for (const rel of data.relations ?? []) {
+      if (rel["target-type"] === "work" && rel.work?.id) return rel.work.id;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 async function matchRecording({ title, artist, isrc }) {
   const cacheKey = JSON.stringify([title, artist, isrc ?? null]);
   if (matchCache.has(cacheKey)) return matchCache.get(cacheKey);
@@ -118,9 +137,12 @@ async function matchRecording({ title, artist, isrc }) {
     artist = searchValue(artist);
     let candidates = [];
     for (const titleVariant of searchVariants(title)) {
-      const query = `recording:"${escapeLucene(titleVariant)}" AND artist:${normalize(artist).split(" ").join(" AND artist:")}`;
-      const data = await mbFetch(`/recording?query=${encodeURIComponent(query)}&limit=25`);
-      candidates.push(...(data.recordings ?? []));
+      for (const artistQuery of artistQueryVariants(artist)) {
+        const query = `recording:"${escapeLucene(titleVariant)}" AND ${artistQuery}`;
+        const data = await mbFetch(`/recording?query=${encodeURIComponent(query)}&limit=25`);
+        candidates.push(...(data.recordings ?? []));
+        if (candidates.length) break;
+      }
       if (candidates.length) break;
     }
     if (!candidates.length) {
@@ -137,8 +159,18 @@ async function matchRecording({ title, artist, isrc }) {
     const exactTitleAndArtist = best && best.titleScore === 1 && best.artistScore === 1;
     const candidateSummaries = ranked.slice(0, 5).map(({ candidate, ...value }) => summary(candidate, value));
     if (!best || best.titleScore < 0.75 || best.artistScore < 0.55 || best.total < 0.72) result = { status: "unmatched", confidence: best?.total ?? 0, candidates: candidateSummaries };
-    else if (!exactTitleAndArtist && runnerUp && best.total - runnerUp.total < 0.08 && runnerUp.artistScore >= 0.55) result = { status: "ambiguous", confidence: best.total, candidates: candidateSummaries };
-    else result = { ...best.candidate, status: "matched", confidence: best.total, candidates: candidateSummaries };
+    else {
+      let sameWork = false;
+      if (!exactTitleAndArtist && runnerUp && best.total - runnerUp.total < 0.08 && runnerUp.artistScore >= 0.55) {
+        const [bestWorkId, runnerUpWorkId] = await Promise.all([
+          getRecordingWorkId(best.candidate.id),
+          getRecordingWorkId(runnerUp.candidate.id),
+        ]);
+        sameWork = !!bestWorkId && bestWorkId === runnerUpWorkId;
+      }
+      if (!exactTitleAndArtist && runnerUp && best.total - runnerUp.total < 0.08 && runnerUp.artistScore >= 0.55 && !sameWork) result = { status: "ambiguous", confidence: best.total, candidates: candidateSummaries };
+      else result = { ...best.candidate, status: "matched", confidence: best.total, candidates: candidateSummaries };
+    }
   }
   matchCache.set(cacheKey, result);
   return result;
@@ -171,7 +203,7 @@ const tracks = db.prepare(`
 `).all();
 const update = db.prepare(`
   UPDATE submission_tracks
-  SET musicbrainz_recording_id = ?, musicbrainz_artist_id = ?, musicbrainz_match_method = ?, musicbrainz_track_name = ?, musicbrainz_artist_name = ?, musicbrainz_match_status = ?, musicbrainz_match_confidence = ?, musicbrainz_candidates_json = ?, musicbrainz_match_error = NULL
+  SET musicbrainz_recording_id = ?, musicbrainz_artist_id = ?, musicbrainz_work_id = ?, musicbrainz_match_method = ?, musicbrainz_track_name = ?, musicbrainz_artist_name = ?, musicbrainz_match_status = ?, musicbrainz_match_confidence = ?, musicbrainz_candidates_json = ?, musicbrainz_match_error = NULL
   WHERE submission_id = ? AND position = ?
 `);
 const recordFailure = db.prepare(`
@@ -186,7 +218,8 @@ for (const track of tracks) {
   try {
     const result = await matchRecording({ title: track.track_name, artist: track.artist_name, isrc: track.isrc ?? undefined });
     const artistName = result?.status === "matched" ? (result["artist-credit"] ?? []).map((credit) => credit.name ?? credit.artist?.name ?? "").join(" & ") || null : null;
-    update.run(result?.status === "matched" ? result.id : null, result?.status === "matched" ? result["artist-credit"]?.[0]?.artist?.id ?? null : null, result?.status === "matched" ? "rematch" : null, result?.status === "matched" ? result.title ?? null : null, artistName, result?.status ?? "unmatched", result?.confidence ?? null, result?.candidates ? JSON.stringify(result.candidates) : null, track.submission_id, track.position);
+    const workId = result?.status === "matched" && result.id ? await getRecordingWorkId(result.id) : null;
+    update.run(result?.status === "matched" ? result.id : null, result?.status === "matched" ? result["artist-credit"]?.[0]?.artist?.id ?? null : null, workId, result?.status === "matched" ? "rematch" : null, result?.status === "matched" ? result.title ?? null : null, artistName, result?.status ?? "unmatched", result?.confidence ?? null, result?.candidates ? JSON.stringify(result.candidates) : null, track.submission_id, track.position);
     if (result?.status === "matched") { matched++; console.log(`Matched ${track.artist_name} - ${track.track_name}`); }
     else if (result?.status === "ambiguous") { rejected++; console.log(`Ambiguous ${track.artist_name} - ${track.track_name}`); }
     else { rejected++; console.log(`Unmatched ${track.artist_name} - ${track.track_name}`); }

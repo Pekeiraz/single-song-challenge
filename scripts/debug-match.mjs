@@ -15,6 +15,13 @@ function normalizeArtist(value) {
   return normalize(value).split(" ").filter(Boolean).sort().join(" ");
 }
 
+function artistQueryVariants(artist) {
+  const variants = [`artist:"${escapeLucene(artist)}"`];
+  const tokens = normalize(artist).split(" ").filter(Boolean);
+  if (tokens.length > 1) variants.push(tokens.map((token) => `artist:${escapeLucene(token)}`).join(" AND "));
+  return variants;
+}
+
 function searchVariants(value) {
   const variants = [value];
   const partMatch = value.match(/\b(?:pt|part)\.?\s+(\d+)\b/i);
@@ -29,10 +36,10 @@ function searchVariants(value) {
 
 function searchValue(value) {
   return value.replace(/\s+-\s+Topic\s*$/i, "")
-    .replace(/\s*[\(\[]\s*(?:\d{4}\s+)?(?:remaster(?:ed)?|remix|mono|stereo|single version|anniversary(?: edition)?|deluxe(?: edition)?|explicit|clean|radio edit)[^)\]]*[\)\]]\s*$/i, "")
+    .replace(/\s*[\(\[]\s*(?:\d{4}\s+)?(?:new version|remaster(?:ed)?|remix|mono|stereo|single version|anniversary(?: edition)?|deluxe(?: edition)?|explicit|clean|radio edit)[^)\]]*[\)\]]\s*$/i, "")
     .replace(/\s*\((?:official\s+)?(?:video|audio|lyrics?|live|remaster(?:ed)?|single version)[^)]*\)\s*$/i, "")
     .replace(/\s*[\(\[]\s*(?:feat\.?|ft\.?|featuring|with)\s+[^)\]]+[\)\]]\s*$/i, "")
-    .replace(/\s+(?:feat\.?|ft\.?|featuring|with)\s+.+$/i, "")
+    .replace(/\s+(?:feat\.?|ft\.?|featuring)\s+.+$/i, "")
     .replace(/\s*\(\s*\d{4}\s*\)\s*$/g, "")
     .replace(/\s*\(\s*\)\s*$/g, "")
     .trim();
@@ -103,11 +110,14 @@ console.log(`NORMALIZED artist=${JSON.stringify(normalize(artist))} title=${JSON
 
 let candidates = [];
 for (const titleVariant of searchVariants(title)) {
-  const query = `recording:"${escapeLucene(titleVariant)}" AND artist:${normalize(artist).split(" ").join(" AND artist:")}`;
-  console.log(`QUERY ${query}`);
-  const data = await mbFetch(`/recording?query=${encodeURIComponent(query)}&limit=25`);
-  console.log(`COUNT ${data.count}`);
-  candidates.push(...(data.recordings ?? []));
+  for (const artistQuery of artistQueryVariants(artist)) {
+    const query = `recording:"${escapeLucene(titleVariant)}" AND ${artistQuery}`;
+    console.log(`QUERY ${query}`);
+    const data = await mbFetch(`/recording?query=${encodeURIComponent(query)}&limit=25`);
+    console.log(`COUNT ${data.count}`);
+    candidates.push(...(data.recordings ?? []));
+    if (candidates.length) break;
+  }
   if (candidates.length) break;
 }
 if (!candidates.length) {

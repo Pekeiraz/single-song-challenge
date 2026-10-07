@@ -27,6 +27,7 @@ export type SubmissionTrackInput = {
   isrc: string | null;
   musicbrainzRecordingId: string | null;
   musicbrainzArtistId: string | null;
+  musicbrainzWorkId?: string | null;
   musicbrainzMatchMethod: string | null;
 };
 
@@ -84,6 +85,7 @@ export function getDb(): DatabaseSync {
         isrc TEXT,
         musicbrainz_recording_id TEXT,
         musicbrainz_artist_id TEXT,
+        musicbrainz_work_id TEXT,
         musicbrainz_match_method TEXT,
         musicbrainz_track_name TEXT,
         musicbrainz_artist_name TEXT,
@@ -148,7 +150,7 @@ export function getDb(): DatabaseSync {
         PRAGMA foreign_keys = ON;
       `);
     }
-    for (const column of ["musicbrainz_track_name", "musicbrainz_artist_name", "musicbrainz_match_status", "musicbrainz_match_confidence", "musicbrainz_candidates_json", "musicbrainz_match_error"]) {
+    for (const column of ["musicbrainz_track_name", "musicbrainz_artist_name", "musicbrainz_match_status", "musicbrainz_match_confidence", "musicbrainz_candidates_json", "musicbrainz_match_error", "musicbrainz_work_id"]) {
       try { db.exec(`ALTER TABLE submission_tracks ADD COLUMN ${column} TEXT`); } catch {}
     }
     // Cover-art cache table for older DBs created before it existed.
@@ -163,8 +165,11 @@ export function getDb(): DatabaseSync {
       CREATE INDEX IF NOT EXISTS idx_tracks_submission ON submission_tracks(submission_id);
       CREATE INDEX IF NOT EXISTS idx_tracks_match_status ON submission_tracks(musicbrainz_match_status);
       CREATE INDEX IF NOT EXISTS idx_tracks_recording ON submission_tracks(musicbrainz_recording_id);
+      CREATE INDEX IF NOT EXISTS idx_tracks_work ON submission_tracks(musicbrainz_work_id);
       CREATE INDEX IF NOT EXISTS idx_submissions_challenge_submitted ON submissions(challenge_id, submitted_at);
     `);
+    try { db.exec(`ALTER TABLE submission_tracks ADD COLUMN musicbrainz_work_id TEXT`); } catch {}
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_tracks_work ON submission_tracks(musicbrainz_work_id);`);
     globalForDb.__playlistDb = db;
   }
   // Self-heal for long-lived/HMR-persisted connections that were opened
@@ -255,7 +260,7 @@ export function replaceSubmission(input: SubmissionInput) {
     // same names/isrc => carry over the previous MusicBrainz result).
     const oldByProviderTrackId = new Map<string, Array<{
       track_name: string; artist_name: string; provider_artist_id: string | null; isrc: string | null;
-      musicbrainz_recording_id: string | null; musicbrainz_artist_id: string | null; musicbrainz_match_method: string | null;
+      musicbrainz_recording_id: string | null; musicbrainz_artist_id: string | null; musicbrainz_work_id: string | null; musicbrainz_match_method: string | null;
       musicbrainz_track_name: string | null; musicbrainz_artist_name: string | null; musicbrainz_match_status: string;
       musicbrainz_match_confidence: number | null; musicbrainz_candidates_json: string | null; musicbrainz_match_error: string | null;
     }>>();
@@ -263,14 +268,14 @@ export function replaceSubmission(input: SubmissionInput) {
       const oldRows = db.prepare(`
         SELECT track_name, artist_name, provider_artist_id, isrc,
                provider_track_id,
-               musicbrainz_recording_id, musicbrainz_artist_id, musicbrainz_match_method,
+               musicbrainz_recording_id, musicbrainz_artist_id, musicbrainz_work_id, musicbrainz_match_method,
                musicbrainz_track_name, musicbrainz_artist_name, musicbrainz_match_status,
                musicbrainz_match_confidence, musicbrainz_candidates_json, musicbrainz_match_error
         FROM submission_tracks WHERE submission_id = ?
       `).all(current.id) as Array<{
         track_name: string; artist_name: string; provider_artist_id: string | null; isrc: string | null;
         provider_track_id: string;
-        musicbrainz_recording_id: string | null; musicbrainz_artist_id: string | null; musicbrainz_match_method: string | null;
+        musicbrainz_recording_id: string | null; musicbrainz_artist_id: string | null; musicbrainz_work_id: string | null; musicbrainz_match_method: string | null;
         musicbrainz_track_name: string | null; musicbrainz_artist_name: string | null; musicbrainz_match_status: string;
         musicbrainz_match_confidence: number | null; musicbrainz_candidates_json: string | null; musicbrainz_match_error: string | null;
       }>;
@@ -290,14 +295,14 @@ export function replaceSubmission(input: SubmissionInput) {
 
     const insertTrack = db.prepare(`
       INSERT INTO submission_tracks
-      (id,submission_id,position,provider_track_id,track_name,artist_name,provider_artist_id,isrc,musicbrainz_recording_id,musicbrainz_artist_id,musicbrainz_match_method,musicbrainz_track_name,musicbrainz_artist_name,musicbrainz_match_status,musicbrainz_match_confidence,musicbrainz_candidates_json,musicbrainz_match_error)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      (id,submission_id,position,provider_track_id,track_name,artist_name,provider_artist_id,isrc,musicbrainz_recording_id,musicbrainz_artist_id,musicbrainz_work_id,musicbrainz_match_method,musicbrainz_track_name,musicbrainz_artist_name,musicbrainz_match_status,musicbrainz_match_confidence,musicbrainz_candidates_json,musicbrainz_match_error)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `);
     let reused = 0;
     for (const track of input.tracks) {
       const candidates = oldByProviderTrackId.get(track.providerTrackId);
       let carried: {
-        musicbrainz_recording_id: string | null; musicbrainz_artist_id: string | null; musicbrainz_match_method: string | null;
+        musicbrainz_recording_id: string | null; musicbrainz_artist_id: string | null; musicbrainz_work_id: string | null; musicbrainz_match_method: string | null;
         musicbrainz_track_name: string | null; musicbrainz_artist_name: string | null; musicbrainz_match_status: string;
         musicbrainz_match_confidence: number | null; musicbrainz_candidates_json: string | null; musicbrainz_match_error: string | null;
       } | null = null;
@@ -318,9 +323,9 @@ export function replaceSubmission(input: SubmissionInput) {
         }
       }
       if (carried) {
-        insertTrack.run(newId(), submissionId, track.position, track.providerTrackId, track.trackName, track.artistName, track.providerArtistId, track.isrc, carried.musicbrainz_recording_id, carried.musicbrainz_artist_id, carried.musicbrainz_match_method, carried.musicbrainz_track_name, carried.musicbrainz_artist_name, carried.musicbrainz_match_status, carried.musicbrainz_match_confidence, carried.musicbrainz_candidates_json, carried.musicbrainz_match_error);
+        insertTrack.run(newId(), submissionId, track.position, track.providerTrackId, track.trackName, track.artistName, track.providerArtistId, track.isrc, carried.musicbrainz_recording_id, carried.musicbrainz_artist_id, carried.musicbrainz_work_id, carried.musicbrainz_match_method, carried.musicbrainz_track_name, carried.musicbrainz_artist_name, carried.musicbrainz_match_status, carried.musicbrainz_match_confidence, carried.musicbrainz_candidates_json, carried.musicbrainz_match_error);
       } else {
-        insertTrack.run(newId(), submissionId, track.position, track.providerTrackId, track.trackName, track.artistName, track.providerArtistId, track.isrc, track.musicbrainzRecordingId, track.musicbrainzArtistId, track.musicbrainzMatchMethod, null, null, "unmatched", null, null, null);
+        insertTrack.run(newId(), submissionId, track.position, track.providerTrackId, track.trackName, track.artistName, track.providerArtistId, track.isrc, track.musicbrainzRecordingId, track.musicbrainzArtistId, track.musicbrainzWorkId ?? null, track.musicbrainzMatchMethod, null, null, "unmatched", null, null, null);
       }
     }
 
@@ -332,12 +337,12 @@ export function replaceSubmission(input: SubmissionInput) {
   }
 }
 
-export function updateSubmissionTrackMatches(submissionId: string, position: number, recordingId: string | null, artistId: string | null, method: string | null, trackName: string | null = null, artistName: string | null = null, status: "matched" | "ambiguous" | "unmatched" = recordingId ? "matched" : "unmatched", confidence: number | null = null, candidatesJson: string | null = null) {
+export function updateSubmissionTrackMatches(submissionId: string, position: number, recordingId: string | null, artistId: string | null, method: string | null, trackName: string | null = null, artistName: string | null = null, status: "matched" | "ambiguous" | "unmatched" = recordingId ? "matched" : "unmatched", confidence: number | null = null, candidatesJson: string | null = null, workId: string | null = null) {
   getDb().prepare(`
     UPDATE submission_tracks
-    SET musicbrainz_recording_id = ?, musicbrainz_artist_id = ?, musicbrainz_match_method = ?, musicbrainz_track_name = ?, musicbrainz_artist_name = ?, musicbrainz_match_status = ?, musicbrainz_match_confidence = ?, musicbrainz_candidates_json = ?, musicbrainz_match_error = NULL
+    SET musicbrainz_recording_id = ?, musicbrainz_artist_id = ?, musicbrainz_work_id = ?, musicbrainz_match_method = ?, musicbrainz_track_name = ?, musicbrainz_artist_name = ?, musicbrainz_match_status = ?, musicbrainz_match_confidence = ?, musicbrainz_candidates_json = ?, musicbrainz_match_error = NULL
     WHERE submission_id = ? AND position = ?
-  `).run(recordingId, artistId, method, trackName, artistName, status, confidence, candidatesJson, submissionId, position);
+  `).run(recordingId, artistId, workId, method, trackName, artistName, status, confidence, candidatesJson, submissionId, position);
 }
 
 export function recordMatchError(submissionId: string, position: number, message: string) {
@@ -348,10 +353,10 @@ export function recordMatchError(submissionId: string, position: number, message
   `).run(message, submissionId, position);
 }
 
-export type ResultRow = { artist_name: string; track_name: string; provider_track_id: string; musicbrainz_artist_id: string | null; musicbrainz_recording_id: string | null; musicbrainz_track_name: string | null; musicbrainz_artist_name: string | null; musicbrainz_match_status: string; musicbrainz_match_confidence: number | null; musicbrainz_candidates_json: string | null; provider: string; submission_id: string };
+export type ResultRow = { artist_name: string; track_name: string; provider_track_id: string; musicbrainz_artist_id: string | null; musicbrainz_recording_id: string | null; musicbrainz_work_id: string | null; musicbrainz_track_name: string | null; musicbrainz_artist_name: string | null; musicbrainz_match_status: string; musicbrainz_match_confidence: number | null; musicbrainz_candidates_json: string | null; provider: string; submission_id: string };
 export function getResultRows(challengeId: string): ResultRow[] {
   return getDb().prepare(`
-    SELECT st.artist_name, st.track_name, st.provider_track_id, st.musicbrainz_artist_id, st.musicbrainz_recording_id, st.musicbrainz_track_name, st.musicbrainz_artist_name, st.musicbrainz_match_status, st.musicbrainz_match_confidence, st.musicbrainz_candidates_json, s.provider, s.id as submission_id
+    SELECT st.artist_name, st.track_name, st.provider_track_id, st.musicbrainz_artist_id, st.musicbrainz_recording_id, st.musicbrainz_work_id, st.musicbrainz_track_name, st.musicbrainz_artist_name, st.musicbrainz_match_status, st.musicbrainz_match_confidence, st.musicbrainz_candidates_json, s.provider, s.id as submission_id
     FROM submission_tracks st
     JOIN submissions s ON s.id = st.submission_id
     WHERE s.challenge_id = ?
@@ -359,11 +364,18 @@ export function getResultRows(challengeId: string): ResultRow[] {
   `).all(challengeId) as ResultRow[];
 }
 
+// Song identity for vote grouping: same composition by the same artist
+// counts as one song, regardless of recording version (studio, live,
+// remaster, re-release). Falls back to normalized names when no work id
+// is known yet, so un-backfilled rows still group sensibly.
+export const SONG_KEY = `COALESCE(st.musicbrainz_work_id, 'name:' || LOWER(st.musicbrainz_artist_name) || '||' || LOWER(st.musicbrainz_track_name))
+  || '||' || COALESCE(st.musicbrainz_artist_id, 'name:' || LOWER(st.musicbrainz_artist_name))`;
+
 // --- Decoupled read path: aggregated, paginated, DB-only. ---
 // Pages must never call MusicBrainz directly; matching happens in a
 // background worker and only stored canonical rows are read here.
 
-export type TopSong = { artist: string; track: string; recordingId: string | null; artistId: string | null; count: number };
+export type TopSong = { artist: string; track: string; recordingId: string | null; artistId: string | null; workId: string | null; count: number };
 
 const CANONICAL_FILTER = `st.musicbrainz_match_status = 'matched'
   AND st.musicbrainz_recording_id IS NOT NULL
@@ -379,11 +391,11 @@ export function getTopSongs(challengeId: string, options: { query?: string; limi
     : "";
   const countRow = db.prepare(`
     SELECT COUNT(*) as n FROM (
-      SELECT st.musicbrainz_recording_id
+      SELECT ${SONG_KEY} as song_key
       FROM submission_tracks st
       JOIN submissions s ON s.id = st.submission_id
       WHERE s.challenge_id = ? AND ${CANONICAL_FILTER} ${whereQuery}
-      GROUP BY st.musicbrainz_recording_id
+      GROUP BY song_key
     )
   `).get(...(like ? [challengeId, like, like] : [challengeId])) as { n: number };
   const total = Number(countRow?.n ?? 0);
@@ -394,18 +406,19 @@ export function getTopSongs(challengeId: string, options: { query?: string; limi
     ? `AND (LOWER(artist) LIKE ? ESCAPE '\\' OR LOWER(track) LIKE ? ESCAPE '\\')`
     : "";
   const items = db.prepare(`
-    SELECT artist, track, recording_id as recordingId, artist_id as artistId, count, rank FROM (
+    SELECT artist, track, recording_id as recordingId, artist_id as artistId, work_id as workId, count, rank FROM (
       SELECT
         st.musicbrainz_artist_name as artist,
         st.musicbrainz_track_name as track,
-        st.musicbrainz_recording_id as recording_id,
+        MIN(st.musicbrainz_recording_id) as recording_id,
         MIN(st.musicbrainz_artist_id) as artist_id,
+        MIN(st.musicbrainz_work_id) as work_id,
         COUNT(*) as count,
         ROW_NUMBER() OVER (ORDER BY COUNT(*) DESC, st.musicbrainz_artist_name ASC, st.musicbrainz_track_name ASC) as rank
       FROM submission_tracks st
       JOIN submissions s ON s.id = st.submission_id
       WHERE s.challenge_id = ? AND ${CANONICAL_FILTER}
-      GROUP BY st.musicbrainz_recording_id
+      GROUP BY ${SONG_KEY}
     )
     WHERE 1 = 1 ${outerFilter}
     ORDER BY rank ASC
@@ -419,7 +432,7 @@ export function getTopPreview(challengeId: string, limit = 5): TopSong[] {
 }
 
 export type ArtistGroup = { artist: string; artistKey: string; artistId: string | null; songCount: number; totalVotes: number };
-export type ArtistSong = { track: string; recordingId: string | null; count: number };
+export type ArtistSong = { track: string; recordingId: string | null; workId: string | null; count: number };
 
 export function getArtistGroups(challengeId: string, options: { query?: string; limit: number; offset: number }): { groups: ArtistGroup[]; totalArtists: number; totalSongs: number } {
   const db = getDb();
@@ -432,7 +445,7 @@ export function getArtistGroups(challengeId: string, options: { query?: string; 
     : "";
   const totals = db.prepare(`
     SELECT COUNT(DISTINCT COALESCE(st.musicbrainz_artist_id, 'name:' || LOWER(st.musicbrainz_artist_name))) as artists,
-           COUNT(DISTINCT st.musicbrainz_recording_id) as songs
+           COUNT(DISTINCT (${SONG_KEY})) as songs
     FROM submission_tracks st
     JOIN submissions s ON s.id = st.submission_id
     WHERE s.challenge_id = ? AND ${CANONICAL_FILTER} ${whereQuery}
@@ -442,7 +455,7 @@ export function getArtistGroups(challengeId: string, options: { query?: string; 
       MIN(st.musicbrainz_artist_name) as artist,
       COALESCE(st.musicbrainz_artist_id, 'name:' || LOWER(st.musicbrainz_artist_name)) as artistKey,
       st.musicbrainz_artist_id as artistId,
-      COUNT(DISTINCT st.musicbrainz_recording_id) as songCount,
+      COUNT(DISTINCT (${SONG_KEY})) as songCount,
       COUNT(*) as totalVotes
     FROM submission_tracks st
     JOIN submissions s ON s.id = st.submission_id
@@ -466,18 +479,19 @@ export function getArtistSongs(challengeId: string, artistKeys: string[]): Map<s
     SELECT
       COALESCE(st.musicbrainz_artist_id, 'name:' || LOWER(st.musicbrainz_artist_name)) as artistKey,
       st.musicbrainz_track_name as track,
-      st.musicbrainz_recording_id as recordingId,
+      MIN(st.musicbrainz_recording_id) as recordingId,
+      MIN(st.musicbrainz_work_id) as workId,
       COUNT(*) as count
     FROM submission_tracks st
     JOIN submissions s ON s.id = st.submission_id
     WHERE s.challenge_id = ? AND ${CANONICAL_FILTER}
       AND COALESCE(st.musicbrainz_artist_id, 'name:' || LOWER(st.musicbrainz_artist_name)) IN (${placeholders})
-    GROUP BY artistKey, st.musicbrainz_recording_id
+    GROUP BY artistKey, ${SONG_KEY}
     ORDER BY count DESC, track COLLATE NOCASE ASC
-  `).all(challengeId, ...artistKeys) as Array<{ artistKey: string; track: string; recordingId: string | null; count: number }>;
+  `).all(challengeId, ...artistKeys) as Array<{ artistKey: string; track: string; recordingId: string | null; workId: string | null; count: number }>;
   for (const row of rows) {
     const list = out.get(row.artistKey) ?? [];
-    list.push({ track: row.track, recordingId: row.recordingId, count: Number(row.count) });
+    list.push({ track: row.track, recordingId: row.recordingId, workId: row.workId, count: Number(row.count) });
     out.set(row.artistKey, list);
   }
   return out;
@@ -490,12 +504,11 @@ export function getCachedCoverArt(recordingIds: string[]): Map<string, string | 
   const ids = [...new Set(recordingIds.filter(Boolean))];
   if (!ids.length) return out;
   try {
-    const now = new Date().toISOString();
     const placeholders = ids.map(() => "?").join(",");
     const rows = getDb().prepare(`
       SELECT recording_id, image_url FROM cover_art_cache
-      WHERE recording_id IN (${placeholders}) AND expires_at > ?
-    `).all(...ids, now) as Array<{ recording_id: string; image_url: string | null }>;
+      WHERE recording_id IN (${placeholders})
+    `).all(...ids) as Array<{ recording_id: string; image_url: string | null }>;
     for (const row of rows) out.set(row.recording_id, row.image_url);
   } catch {
     // Table may not exist yet on very old DBs / stale connections —
@@ -509,8 +522,41 @@ export function getMissingCoverArtIds(recordingIds: string[]): string[] {
   return [...new Set(recordingIds.filter(Boolean))].filter((id) => !cached.has(id));
 }
 
-export function setCachedCoverArt(recordingId: string, releaseId: string | null, imageUrl: string | null, ttlSeconds = 7 * 24 * 3600) {
+export function getPendingCoverArtRecordings(limit = 50): string[] {
+  const rows = getDb().prepare(`
+    SELECT DISTINCT st.musicbrainz_recording_id AS recording_id
+    FROM submission_tracks st
+    WHERE st.musicbrainz_recording_id IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM cover_art_cache cac
+        WHERE cac.recording_id = st.musicbrainz_recording_id
+      )
+    ORDER BY st.rowid ASC
+    LIMIT ?
+  `).all(limit) as Array<{ recording_id: string }>;
+  return rows.map((row) => row.recording_id);
+}
+
+export function countPendingCoverArtRecordings(): number {
+  const row = getDb().prepare(`
+    SELECT COUNT(*) as n FROM (
+      SELECT DISTINCT st.musicbrainz_recording_id AS recording_id
+      FROM submission_tracks st
+      WHERE st.musicbrainz_recording_id IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM cover_art_cache cac
+          WHERE cac.recording_id = st.musicbrainz_recording_id
+        )
+    )
+  `).get() as { n: number } | undefined;
+  return Number(row?.n ?? 0);
+}
+
+export function setCachedCoverArt(recordingId: string, releaseId: string | null, imageUrl: string | null, ttlSeconds: number | null = null) {
   const now = Date.now();
+  const expiresAt = ttlSeconds === null || ttlSeconds <= 0
+    ? "9999-12-31T23:59:59.999Z"
+    : new Date(now + ttlSeconds * 1000).toISOString();
   getDb().prepare(`
     INSERT INTO cover_art_cache (recording_id, release_id, image_url, fetched_at, expires_at)
     VALUES (?, ?, ?, ?, ?)
@@ -519,7 +565,7 @@ export function setCachedCoverArt(recordingId: string, releaseId: string | null,
       image_url = excluded.image_url,
       fetched_at = excluded.fetched_at,
       expires_at = excluded.expires_at
-  `).run(recordingId, releaseId, imageUrl, new Date(now).toISOString(), new Date(now + ttlSeconds * 1000).toISOString());
+  `).run(recordingId, releaseId, imageUrl, new Date(now).toISOString(), expiresAt);
 }
 
 // --- Background matching queue: tracks never matched yet. ---
